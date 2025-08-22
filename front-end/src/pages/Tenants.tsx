@@ -1,7 +1,21 @@
-
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Users, Plus, Edit, Trash2, Phone, MapPin, User, X, Calendar, FileText } from 'lucide-react';
+import { useApiWithLimitCheck } from '../hooks/useApiWithLimitCheck';
+import { 
+  Users, 
+  Plus, 
+  Search, 
+  Edit, 
+  Trash2, 
+  Eye,
+  UserX,
+  Calendar,
+  MapPin,
+  Phone,
+  Building2,
+  AlertTriangle,
+  RefreshCw
+} from 'lucide-react';
 
 interface Tenant {
   id: number;
@@ -11,44 +25,44 @@ interface Tenant {
   phone: string;
   city: string;
   subcity: string;
-  woreda?: string;
-  house_no?: string;
-  organization?: string;
+  woreda: string;
+  house_no: string;
+  organization: string;
   has_agent: boolean;
   agent_full_name?: string;
-  agent_sex?: string;
   agent_phone?: string;
-  agent_city?: string;
-  agent_woreda?: string;
-  agent_house_no?: string;
-  authentication_no?: string;
-  authentication_date?: string;
   property_name?: string;
   unit_number?: string;
   monthly_rent?: number;
-  contract_status?: string;
   contract_start_date?: string;
   contract_end_date?: string;
-  days_until_expiry?: number | null;
-  days_until_next_payment?: number | null;
-  termination_date?: string;
-  termination_reason?: string;
-  termination_notes?: string;
+  contract_status?: string;
+  days_until_expiry?: number;
+  contract_id?: number;
+  created_at: string;
+}
+
+interface Contract {
+  id: number;
+  property_name: string;
+  unit_number: string;
+  monthly_rent: number;
+  contract_start_date: string;
+  contract_end_date: string;
+  status: string;
 }
 
 const Tenants: React.FC = () => {
   const { token } = useAuth();
+  const { apiCall } = useApiWithLimitCheck();
   const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [terminatedTenants, setTerminatedTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [showTerminateModal, setShowTerminateModal] = useState(false);
-  const [showTenantModal, setShowTenantModal] = useState(false);
-  const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
-  const [terminatingTenant, setTerminatingTenant] = useState<Tenant | null>(null);
+  const [showRenewModal, setShowRenewModal] = useState(false);
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'active' | 'terminated'>('active');
   const [formData, setFormData] = useState({
     tenantId: '',
     fullName: '',
@@ -70,19 +84,23 @@ const Tenants: React.FC = () => {
     authenticationNo: '',
     authenticationDate: '',
   });
-
-  const [terminationFormData, setTerminationFormData] = useState({
+  const [terminationData, setTerminationData] = useState({
     terminationDate: new Date().toISOString().split('T')[0],
     terminationReason: '',
     securityDepositAction: 'return_full',
     partialReturnAmount: '',
     deductions: [] as Array<{description: string, amount: number}>,
-    notes: ''
+    notes: '',
+  });
+  const [renewalData, setRenewalData] = useState({
+    newEndDate: '',
+    monthlyRent: '',
+    deposit: '',
+    notes: '',
   });
 
   useEffect(() => {
     fetchTenants();
-    fetchTerminatedTenants();
   }, [token]);
 
   const fetchTenants = async () => {
@@ -104,29 +122,50 @@ const Tenants: React.FC = () => {
     }
   };
 
-  const fetchTerminatedTenants = async () => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
     try {
-      const response = await fetch('http://localhost:5000/api/tenants/terminated', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const createFn = async () => {
+        const response = await fetch('http://localhost:5000/api/tenants', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(formData),
+        });
 
-      if (response.ok) {
-        const data = await response.json();
-        setTerminatedTenants(data.tenants || []);
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw { response: { status: response.status, data: errorData } };
+        }
+        return response.json();
+      };
+
+      const result = await apiCall(createFn, 'tenants');
+
+      if (result) {
+        setShowAddModal(false);
+        resetForm();
+        fetchTenants();
       }
-    } catch (error) {
-      console.error('Failed to fetch terminated tenants:', error);
+    } catch (error: any) {
+      console.error('Failed to create tenant:', error);
+      if (error?.response?.status !== 403) {
+        alert('Failed to create tenant');
+      }
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!selectedTenant) return;
 
     try {
-      const response = await fetch('http://localhost:5000/api/tenants', {
-        method: 'POST',
+      const response = await fetch(`http://localhost:5000/api/tenants/${selectedTenant.id}`, {
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
@@ -135,12 +174,97 @@ const Tenants: React.FC = () => {
       });
 
       if (response.ok) {
-        setShowAddModal(false);
+        setShowEditModal(false);
+        setSelectedTenant(null);
         resetForm();
         fetchTenants();
       }
     } catch (error) {
-      console.error('Failed to create tenant:', error);
+      console.error('Failed to update tenant:', error);
+      alert('Failed to update tenant');
+    }
+  };
+
+  const handleDelete = async (tenantId: number) => {
+    if (!confirm('Are you sure you want to delete this tenant?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/tenants/${tenantId}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        fetchTenants();
+      }
+    } catch (error) {
+      console.error('Failed to delete tenant:', error);
+      alert('Failed to delete tenant');
+    }
+  };
+
+  const handleTerminate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!selectedTenant) return;
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/tenants/${selectedTenant.id}/terminate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(terminationData),
+      });
+
+      if (response.ok) {
+        setShowTerminateModal(false);
+        setSelectedTenant(null);
+        resetTerminationForm();
+        fetchTenants();
+        alert('Tenant terminated successfully');
+      }
+    } catch (error) {
+      console.error('Failed to terminate tenant:', error);
+      alert('Failed to terminate tenant');
+    }
+  };
+
+  const handleRenewLease = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!selectedTenant?.contract_id) return;
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/contracts/${selectedTenant.contract_id}/renew`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          newEndDate: renewalData.newEndDate,
+          monthlyRent: parseFloat(renewalData.monthlyRent),
+          deposit: parseFloat(renewalData.deposit),
+          notes: renewalData.notes,
+        }),
+      });
+
+      if (response.ok) {
+        setShowRenewModal(false);
+        setSelectedTenant(null);
+        resetRenewalForm();
+        fetchTenants();
+        alert('Lease renewed successfully');
+      }
+    } catch (error) {
+      console.error('Failed to renew lease:', error);
+      alert('Failed to renew lease');
     }
   };
 
@@ -168,6 +292,26 @@ const Tenants: React.FC = () => {
     });
   };
 
+  const resetTerminationForm = () => {
+    setTerminationData({
+      terminationDate: new Date().toISOString().split('T')[0],
+      terminationReason: '',
+      securityDepositAction: 'return_full',
+      partialReturnAmount: '',
+      deductions: [],
+      notes: '',
+    });
+  };
+
+  const resetRenewalForm = () => {
+    setRenewalData({
+      newEndDate: '',
+      monthlyRent: '',
+      deposit: '',
+      notes: '',
+    });
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
     setFormData(prev => ({
@@ -176,230 +320,52 @@ const Tenants: React.FC = () => {
     }));
   };
 
-  const handleEdit = (tenant: Tenant) => {
-    setEditingTenant(tenant);
+  const openEditModal = (tenant: Tenant) => {
+    setSelectedTenant(tenant);
     setFormData({
-      tenantId: tenant.tenant_id || '',
-      fullName: tenant.full_name || '',
-      sex: tenant.sex || 'Male',
-      phone: tenant.phone || '',
-      city: tenant.city || '',
-      subcity: tenant.subcity || '',
-      woreda: tenant.woreda || '',
-      houseNo: tenant.house_no || '',
+      tenantId: tenant.tenant_id,
+      fullName: tenant.full_name,
+      sex: tenant.sex,
+      phone: tenant.phone,
+      city: tenant.city,
+      subcity: tenant.subcity,
+      woreda: tenant.woreda,
+      houseNo: tenant.house_no,
       organization: tenant.organization || '',
-      hasAgent: tenant.has_agent || false,
+      hasAgent: tenant.has_agent,
       agentFullName: tenant.agent_full_name || '',
-      agentSex: tenant.agent_sex || 'Male',
+      agentSex: 'Male',
       agentPhone: tenant.agent_phone || '',
-      agentCity: tenant.agent_city || '',
-      agentSubcity: tenant.agent_subcity || '',
-      agentWoreda: tenant.agent_woreda || '',
-      agentHouseNo: tenant.agent_house_no || '',
-      authenticationNo: tenant.authentication_no || '',
-      authenticationDate: tenant.authentication_date || '',
+      agentCity: '',
+      agentSubcity: '',
+      agentWoreda: '',
+      agentHouseNo: '',
+      authenticationNo: '',
+      authenticationDate: '',
     });
-    setShowAddModal(true);
+    setShowEditModal(true);
   };
 
-  const handleDelete = async (id: number) => {
-    if (window.confirm('Are you sure you want to delete this tenant?')) {
-      try {
-        const response = await fetch(`http://localhost:5000/api/tenants/${id}`, {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (response.ok) {
-          fetchTenants();
-        }
-      } catch (error) {
-        console.error('Failed to delete tenant:', error);
-      }
-    }
-  };
-
-  const handleTerminate = (tenant: Tenant) => {
-    setTerminatingTenant(tenant);
+  const openTerminateModal = (tenant: Tenant) => {
+    setSelectedTenant(tenant);
     setShowTerminateModal(true);
   };
 
-  const handleTerminationSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!terminatingTenant) return;
-
-    try {
-      const response = await fetch(`http://localhost:5000/api/tenants/${terminatingTenant.id}/terminate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(terminationFormData),
-      });
-
-      if (response.ok) {
-        setShowTerminateModal(false);
-        setTerminatingTenant(null);
-        setTerminationFormData({
-          terminationDate: new Date().toISOString().split('T')[0],
-          terminationReason: '',
-          securityDepositAction: 'return_full',
-          partialReturnAmount: '',
-          deductions: [],
-          notes: ''
-        });
-        fetchTenants();
-        fetchTerminatedTenants();
-      }
-    } catch (error) {
-      console.error('Failed to terminate tenant:', error);
-    }
-  };
-
-  const addDeduction = () => {
-    setTerminationFormData({
-      ...terminationFormData,
-      deductions: [...terminationFormData.deductions, { description: '', amount: 0 }]
-    });
-  };
-
-  const removeDeduction = (index: number) => {
-    setTerminationFormData({
-      ...terminationFormData,
-      deductions: terminationFormData.deductions.filter((_, i) => i !== index)
-    });
-  };
-
-  const updateDeduction = (index: number, field: 'description' | 'amount', value: string | number) => {
-    const updatedDeductions = [...terminationFormData.deductions];
-    updatedDeductions[index] = { ...updatedDeductions[index], [field]: value };
-    setTerminationFormData({ ...terminationFormData, deductions: updatedDeductions });
-  };
-
-  const openTenantModal = (tenant: Tenant) => {
+  const openRenewModal = (tenant: Tenant) => {
     setSelectedTenant(tenant);
-    setShowTenantModal(true);
+    setRenewalData({
+      newEndDate: '',
+      monthlyRent: tenant.monthly_rent?.toString() || '',
+      deposit: '',
+      notes: '',
+    });
+    setShowRenewModal(true);
   };
 
   const filteredTenants = tenants.filter(tenant =>
-    tenant.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    tenant.tenant_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    tenant.phone?.includes(searchTerm) ||
-    tenant.city?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const filteredTerminatedTenants = terminatedTenants.filter(tenant =>
-    tenant.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    tenant.tenant_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    tenant.phone?.includes(searchTerm) ||
-    tenant.city?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const renderTenantCard = (tenant: Tenant) => (
-    <div
-      key={tenant.id}
-      className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 cursor-pointer hover:shadow-md transition-shadow"
-      onClick={() => openTenantModal(tenant)}
-    >
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center">
-          <div className="flex-shrink-0 h-12 w-12">
-            <div className="h-12 w-12 rounded-full bg-blue-500 flex items-center justify-center">
-              <span className="text-lg font-medium text-white">
-                {tenant.full_name?.charAt(0)}
-              </span>
-            </div>
-          </div>
-          <div className="ml-3">
-            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
-              {tenant.full_name}
-            </h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              ID: {tenant.tenant_id} • {tenant.sex}
-            </p>
-          </div>
-        </div>
-        {activeTab === 'active' && tenant.contract_status === 'active' && (
-          <div className="flex space-x-2">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                handleEdit(tenant);
-              }}
-              className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 text-sm"
-            >
-              Edit
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                handleTerminate(tenant);
-              }}
-              className="text-orange-600 hover:text-orange-900 dark:text-orange-400 dark:hover:text-orange-300 text-sm"
-            >
-              Terminate
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div className="space-y-2">
-        <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
-          <Phone className="h-4 w-4 mr-2" />
-          {tenant.phone}
-        </div>
-        <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
-          <MapPin className="h-4 w-4 mr-2" />
-          {tenant.city}, {tenant.subcity}
-        </div>
-        {tenant.property_name && (
-          <div className="text-sm text-gray-600 dark:text-gray-400">
-            <span className="font-medium">Property:</span> {tenant.property_name}
-            {tenant.unit_number && ` - Unit ${tenant.unit_number}`}
-          </div>
-        )}
-        {tenant.contract_status === 'active' && tenant.monthly_rent && (
-          <div className="text-sm text-gray-600 dark:text-gray-400">
-            <span className="font-medium">Rent:</span> ${tenant.monthly_rent}/month
-          </div>
-        )}
-        {activeTab === 'terminated' && tenant.termination_date && (
-          <div className="text-sm text-red-600 dark:text-red-400">
-            <span className="font-medium">Terminated:</span> {new Date(tenant.termination_date).toLocaleDateString()}
-          </div>
-        )}
-      </div>
-
-      {activeTab === 'active' && tenant.contract_status === 'active' && (
-        <div className="mt-3 flex space-x-4">
-          {tenant.days_until_expiry !== null && (
-            <div className={`text-sm ${
-              tenant.days_until_expiry <= 30
-                ? 'text-red-600 dark:text-red-400'
-                : tenant.days_until_expiry <= 60
-                ? 'text-yellow-600 dark:text-yellow-400'
-                : 'text-green-600 dark:text-green-400'
-            }`}>
-              Contract: {tenant.days_until_expiry} days
-            </div>
-          )}
-          {tenant.days_until_next_payment !== null && (
-            <div className={`text-sm ${
-              tenant.days_until_next_payment <= 0
-                ? 'text-red-600 dark:text-red-400'
-                : tenant.days_until_next_payment <= 7
-                ? 'text-yellow-600 dark:text-yellow-400'
-                : 'text-green-600 dark:text-green-400'
-            }`}>
-              Payment: {tenant.days_until_next_payment <= 0 ? 'Overdue' : `${tenant.days_until_next_payment} days`}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+    tenant.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    tenant.phone.includes(searchTerm) ||
+    (tenant.property_name && tenant.property_name.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   if (loading) {
@@ -412,349 +378,652 @@ const Tenants: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-4 sm:space-y-0">
+      <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Tenants</h1>
-          <p className="text-gray-600 dark:text-gray-400">Manage your tenant information</p>
+          <h1 className="text-2xl font-bold text-gray-900">Tenants</h1>
+          <p className="text-gray-600">Manage your tenants and their information</p>
         </div>
-        <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4 w-full sm:w-auto">
-          <input
-            type="text"
-            placeholder="Search tenants..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100 w-full sm:w-64"
-          />
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200"
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          Add Tenant
+        </button>
+      </div>
+
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+        <input
+          type="text"
+          placeholder="Search tenants..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        />
+      </div>
+
+      {/* Tenants Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredTenants.map((tenant) => (
+          <div key={tenant.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow duration-200">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-1">{tenant.full_name}</h3>
+                <p className="text-sm text-gray-600">ID: {tenant.tenant_id}</p>
+              </div>
+              <div className="flex space-x-2">
+                <button
+                  onClick={() => openEditModal(tenant)}
+                  className="text-yellow-600 hover:text-yellow-800"
+                  title="Edit Tenant"
+                >
+                  <Edit className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => handleDelete(tenant.id)}
+                  className="text-red-600 hover:text-red-800"
+                  title="Delete Tenant"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center text-sm text-gray-600">
+                <Phone className="h-4 w-4 mr-2" />
+                <span>{tenant.phone}</span>
+              </div>
+
+              <div className="flex items-center text-sm text-gray-600">
+                <MapPin className="h-4 w-4 mr-2" />
+                <span className="truncate">{tenant.city}, {tenant.subcity}</span>
+              </div>
+
+              {tenant.property_name && (
+                <div className="flex items-center text-sm text-gray-600">
+                  <Building2 className="h-4 w-4 mr-2" />
+                  <span className="truncate">{tenant.property_name} - Unit {tenant.unit_number}</span>
+                </div>
+              )}
+
+              {tenant.has_agent && (
+                <div className="text-sm text-blue-600">
+                  Agent: {tenant.agent_full_name}
+                </div>
+              )}
+            </div>
+
+            {/* Contract Info */}
+            {tenant.contract_status === 'active' && (
+              <div className="mt-4 pt-4 border-t border-gray-200">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-sm text-gray-500">Monthly Rent</span>
+                  <span className="text-sm font-medium text-gray-900">${tenant.monthly_rent}</span>
+                </div>
+                
+                {tenant.days_until_expiry !== null && (
+                  <div className="flex justify-between items-center mb-3">
+                    <span className="text-sm text-gray-500">Contract Expires</span>
+                    <span className={`text-sm font-medium ${
+                      tenant.days_until_expiry <= 30 ? 'text-red-600' : 'text-gray-900'
+                    }`}>
+                      {tenant.days_until_expiry > 0 ? `${tenant.days_until_expiry} days` : 'Expired'}
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex space-x-2">
+                  {tenant.days_until_expiry <= 60 && tenant.days_until_expiry > 0 && (
+                    <button
+                      onClick={() => openRenewModal(tenant)}
+                      className="flex-1 flex items-center justify-center px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors duration-200 text-sm"
+                    >
+                      <RefreshCw className="h-3 w-3 mr-1" />
+                      Renew
+                    </button>
+                  )}
+                  <button
+                    onClick={() => openTerminateModal(tenant)}
+                    className="flex-1 flex items-center justify-center px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors duration-200 text-sm"
+                  >
+                    <UserX className="h-3 w-3 mr-1" />
+                    Terminate
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {filteredTenants.length === 0 && (
+        <div className="text-center py-12">
+          <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-gray-900 mb-2">No tenants found</h3>
+          <p className="text-gray-600 mb-4">
+            {searchTerm ? 'Try adjusting your search criteria' : 'Get started by adding your first tenant'}
+          </p>
           <button
             onClick={() => setShowAddModal(true)}
-            className="flex items-center justify-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200 dark:bg-blue-700 dark:hover:bg-blue-600 w-full sm:w-auto"
+            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200"
           >
             <Plus className="h-4 w-4 mr-2" />
             Add Tenant
           </button>
         </div>
-      </div>
+      )}
 
-      {/* Tab Switcher */}
-      <div className="border-b border-gray-200 dark:border-gray-700">
-        <nav className="-mb-px flex space-x-8">
-          <button
-            onClick={() => setActiveTab('active')}
-            className={`py-2 px-1 border-b-2 font-medium text-sm ${
-              activeTab === 'active'
-                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
-            }`}
-          >
-            Active Tenants ({filteredTenants.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('terminated')}
-            className={`py-2 px-1 border-b-2 font-medium text-sm ${
-              activeTab === 'terminated'
-                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
-            }`}
-          >
-            Terminated Tenants ({filteredTerminatedTenants.length})
-          </button>
-        </nav>
-      </div>
+      {/* Add Tenant Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
+              <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
+            </div>
 
-      {/* Tenants Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {activeTab === 'active' 
-          ? filteredTenants.map(renderTenantCard)
-          : filteredTerminatedTenants.map(renderTenantCard)
-        }
-      </div>
+            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full">
+              <form onSubmit={handleSubmit}>
+                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4 max-h-96 overflow-y-auto">
+                  <div className="mb-4">
+                    <h3 className="text-lg font-medium text-gray-900 mb-4">Add New Tenant</h3>
+                    
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Tenant ID *
+                          </label>
+                          <input
+                            type="text"
+                            name="tenantId"
+                            required
+                            value={formData.tenantId}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="T001"
+                          />
+                        </div>
 
-      {((activeTab === 'active' && filteredTenants.length === 0) || 
-        (activeTab === 'terminated' && filteredTerminatedTenants.length === 0)) && (
-        <div className="text-center py-12">
-          <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-            No {activeTab} tenants found
-          </h3>
-          <p className="text-gray-600 dark:text-gray-400 mb-4">
-            {activeTab === 'active' 
-              ? 'Try adjusting your search or add a new tenant'
-              : 'No terminated tenants match your search criteria'
-            }
-          </p>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Full Name *
+                          </label>
+                          <input
+                            type="text"
+                            name="fullName"
+                            required
+                            value={formData.fullName}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="John Doe"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Sex *
+                          </label>
+                          <select
+                            name="sex"
+                            required
+                            value={formData.sex}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          >
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Phone *
+                          </label>
+                          <input
+                            type="tel"
+                            name="phone"
+                            required
+                            value={formData.phone}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="0911123456"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-4 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            City *
+                          </label>
+                          <input
+                            type="text"
+                            name="city"
+                            required
+                            value={formData.city}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="Addis Ababa"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Subcity *
+                          </label>
+                          <input
+                            type="text"
+                            name="subcity"
+                            required
+                            value={formData.subcity}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="Bole"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Woreda *
+                          </label>
+                          <input
+                            type="text"
+                            name="woreda"
+                            required
+                            value={formData.woreda}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="01"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            House No *
+                          </label>
+                          <input
+                            type="text"
+                            name="houseNo"
+                            required
+                            value={formData.houseNo}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="123"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Organization
+                        </label>
+                        <input
+                          type="text"
+                          name="organization"
+                          value={formData.organization}
+                          onChange={handleInputChange}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          placeholder="Company name"
+                        />
+                      </div>
+
+                      <div className="flex items-center">
+                        <input
+                          type="checkbox"
+                          name="hasAgent"
+                          checked={formData.hasAgent}
+                          onChange={handleInputChange}
+                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        />
+                        <label className="ml-2 block text-sm text-gray-900">
+                          Has Agent
+                        </label>
+                      </div>
+
+                      {formData.hasAgent && (
+                        <div className="space-y-4 p-4 bg-gray-50 rounded-lg">
+                          <h4 className="text-sm font-medium text-gray-900">Agent Information</h4>
+                          
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Agent Name
+                              </label>
+                              <input
+                                type="text"
+                                name="agentFullName"
+                                value={formData.agentFullName}
+                                onChange={handleInputChange}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                placeholder="Agent full name"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Agent Phone
+                              </label>
+                              <input
+                                type="tel"
+                                name="agentPhone"
+                                value={formData.agentPhone}
+                                onChange={handleInputChange}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                placeholder="0911123456"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                  <button
+                    type="submit"
+                    className="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm"
+                  >
+                    Add Tenant
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddModal(false);
+                      resetForm();
+                    }}
+                    className="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Tenant Details Modal */}
-      {showTenantModal && selectedTenant && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="inline-block align-bottom bg-white dark:bg-gray-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full max-h-screen overflow-y-auto">
-            <div className="bg-white dark:bg-gray-800 px-4 pt-5 pb-4 sm:p-6">
-              <div className="flex justify-between items-start mb-4">
-                <div className="flex items-center">
-                  <div className="flex-shrink-0 h-16 w-16">
-                    <div className="h-16 w-16 rounded-full bg-blue-500 flex items-center justify-center">
-                      <span className="text-xl font-medium text-white">
-                        {selectedTenant.full_name?.charAt(0)}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="ml-4">
-                    <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                      {selectedTenant.full_name}
-                    </h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      ID: {selectedTenant.tenant_id} • {selectedTenant.sex}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowTenantModal(false)}
-                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                >
-                  <X className="h-6 w-6" />
-                </button>
-              </div>
-
-              <div className="space-y-6">
-                {/* Contact Information */}
-                <div>
-                  <h4 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-3">Contact Information</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="flex items-center">
-                      <Phone className="h-5 w-5 text-gray-400 mr-3" />
-                      <span className="text-gray-900 dark:text-gray-100">{selectedTenant.phone}</span>
-                    </div>
-                    <div className="flex items-center">
-                      <MapPin className="h-5 w-5 text-gray-400 mr-3" />
-                      <span className="text-gray-900 dark:text-gray-100">
-                        {selectedTenant.city}, {selectedTenant.subcity}
-                      </span>
-                    </div>
-                    <div className="col-span-2">
-                      <span className="text-gray-600 dark:text-gray-400">Address: </span>
-                      <span className="text-gray-900 dark:text-gray-100">
-                        Woreda {selectedTenant.woreda}, House {selectedTenant.house_no}
-                      </span>
-                    </div>
-                    {selectedTenant.organization && (
-                      <div className="col-span-2">
-                        <span className="text-gray-600 dark:text-gray-400">Organization: </span>
-                        <span className="text-gray-900 dark:text-gray-100">{selectedTenant.organization}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Agent Information */}
-                {selectedTenant.has_agent && (
-                  <div>
-                    <h4 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-3">Agent Information</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <span className="text-gray-600 dark:text-gray-400">Name: </span>
-                        <span className="text-gray-900 dark:text-gray-100">{selectedTenant.agent_full_name}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600 dark:text-gray-400">Sex: </span>
-                        <span className="text-gray-900 dark:text-gray-100">{selectedTenant.agent_sex}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600 dark:text-gray-400">Phone: </span>
-                        <span className="text-gray-900 dark:text-gray-100">{selectedTenant.agent_phone}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600 dark:text-gray-400">City: </span>
-                        <span className="text-gray-900 dark:text-gray-100">{selectedTenant.agent_city}</span>
-                      </div>
-                      {selectedTenant.authentication_no && (
-                        <div className="col-span-2">
-                          <span className="text-gray-600 dark:text-gray-400">Authentication No: </span>
-                          <span className="text-gray-900 dark:text-gray-100">{selectedTenant.authentication_no}</span>
-                        </div>
-                      )}
-                      {selectedTenant.authentication_date && (
-                        <div className="col-span-2">
-                          <span className="text-gray-600 dark:text-gray-400">Authentication Date: </span>
-                          <span className="text-gray-900 dark:text-gray-100">
-                            {new Date(selectedTenant.authentication_date).toLocaleDateString()}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Property Information */}
-                {selectedTenant.property_name && (
-                  <div>
-                    <h4 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-3">Property Information</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <span className="text-gray-600 dark:text-gray-400">Property: </span>
-                        <span className="text-gray-900 dark:text-gray-100">{selectedTenant.property_name}</span>
-                      </div>
-                      {selectedTenant.unit_number && (
-                        <div>
-                          <span className="text-gray-600 dark:text-gray-400">Unit: </span>
-                          <span className="text-gray-900 dark:text-gray-100">{selectedTenant.unit_number}</span>
-                        </div>
-                      )}
-                      {selectedTenant.monthly_rent && (
-                        <div>
-                          <span className="text-gray-600 dark:text-gray-400">Monthly Rent: </span>
-                          <span className="text-gray-900 dark:text-gray-100">${selectedTenant.monthly_rent}</span>
-                        </div>
-                      )}
-                      <div>
-                        <span className="text-gray-600 dark:text-gray-400">Status: </span>
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          selectedTenant.contract_status === 'active'
-                            ? 'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100'
-                            : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
-                        }`}>
-                          {selectedTenant.contract_status || 'No active contract'}
-                        </span>
-                      </div>
-                      {selectedTenant.contract_start_date && (
-                        <div>
-                          <span className="text-gray-600 dark:text-gray-400">Contract Start: </span>
-                          <span className="text-gray-900 dark:text-gray-100">
-                            {new Date(selectedTenant.contract_start_date).toLocaleDateString()}
-                          </span>
-                        </div>
-                      )}
-                      {selectedTenant.contract_end_date && (
-                        <div>
-                          <span className="text-gray-600 dark:text-gray-400">Contract End: </span>
-                          <span className="text-gray-900 dark:text-gray-100">
-                            {new Date(selectedTenant.contract_end_date).toLocaleDateString()}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Termination Information */}
-                {activeTab === 'terminated' && selectedTenant.termination_date && (
-                  <div>
-                    <h4 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-3">Termination Information</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <span className="text-gray-600 dark:text-gray-400">Termination Date: </span>
-                        <span className="text-gray-900 dark:text-gray-100">
-                          {new Date(selectedTenant.termination_date).toLocaleDateString()}
-                        </span>
-                      </div>
-                      {selectedTenant.termination_reason && (
-                        <div>
-                          <span className="text-gray-600 dark:text-gray-400">Reason: </span>
-                          <span className="text-gray-900 dark:text-gray-100">
-                            {selectedTenant.termination_reason.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                          </span>
-                        </div>
-                      )}
-                      {selectedTenant.termination_notes && (
-                        <div className="col-span-2">
-                          <span className="text-gray-600 dark:text-gray-400">Notes: </span>
-                          <span className="text-gray-900 dark:text-gray-100">{selectedTenant.termination_notes}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
+      {/* Edit Tenant Modal */}
+      {showEditModal && selectedTenant && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
+              <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
             </div>
 
-            <div className="bg-gray-50 dark:bg-gray-700 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-              {activeTab === 'active' && selectedTenant.contract_status === 'active' && (
-                <div className="flex space-x-3">
+            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full">
+              <form onSubmit={handleUpdate}>
+                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4 max-h-96 overflow-y-auto">
+                  <div className="mb-4">
+                    <h3 className="text-lg font-medium text-gray-900 mb-4">Edit Tenant</h3>
+                    
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Tenant ID *
+                          </label>
+                          <input
+                            type="text"
+                            name="tenantId"
+                            required
+                            value={formData.tenantId}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Full Name *
+                          </label>
+                          <input
+                            type="text"
+                            name="fullName"
+                            required
+                            value={formData.fullName}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Sex *
+                          </label>
+                          <select
+                            name="sex"
+                            required
+                            value={formData.sex}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          >
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Phone *
+                          </label>
+                          <input
+                            type="tel"
+                            name="phone"
+                            required
+                            value={formData.phone}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-4 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            City *
+                          </label>
+                          <input
+                            type="text"
+                            name="city"
+                            required
+                            value={formData.city}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Subcity *
+                          </label>
+                          <input
+                            type="text"
+                            name="subcity"
+                            required
+                            value={formData.subcity}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Woreda *
+                          </label>
+                          <input
+                            type="text"
+                            name="woreda"
+                            required
+                            value={formData.woreda}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            House No *
+                          </label>
+                          <input
+                            type="text"
+                            name="houseNo"
+                            required
+                            value={formData.houseNo}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Organization
+                        </label>
+                        <input
+                          type="text"
+                          name="organization"
+                          value={formData.organization}
+                          onChange={handleInputChange}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+
+                      <div className="flex items-center">
+                        <input
+                          type="checkbox"
+                          name="hasAgent"
+                          checked={formData.hasAgent}
+                          onChange={handleInputChange}
+                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        />
+                        <label className="ml-2 block text-sm text-gray-900">
+                          Has Agent
+                        </label>
+                      </div>
+
+                      {formData.hasAgent && (
+                        <div className="space-y-4 p-4 bg-gray-50 rounded-lg">
+                          <h4 className="text-sm font-medium text-gray-900">Agent Information</h4>
+                          
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Agent Name
+                              </label>
+                              <input
+                                type="text"
+                                name="agentFullName"
+                                value={formData.agentFullName}
+                                onChange={handleInputChange}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Agent Phone
+                              </label>
+                              <input
+                                type="tel"
+                                name="agentPhone"
+                                value={formData.agentPhone}
+                                onChange={handleInputChange}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
                   <button
-                    onClick={() => {
-                      setShowTenantModal(false);
-                      handleEdit(selectedTenant);
-                    }}
-                    className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm"
+                    type="submit"
+                    className="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm"
                   >
-                    Edit Tenant
+                    Update Tenant
                   </button>
                   <button
+                    type="button"
                     onClick={() => {
-                      setShowTenantModal(false);
-                      handleTerminate(selectedTenant);
+                      setShowEditModal(false);
+                      setSelectedTenant(null);
+                      resetForm();
                     }}
-                    className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-orange-600 text-base font-medium text-white hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 sm:ml-3 sm:w-auto sm:text-sm"
+                    className="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
                   >
-                    Terminate
+                    Cancel
                   </button>
                 </div>
-              )}
-              <button
-                onClick={() => setShowTenantModal(false)}
-                className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 dark:border-gray-600 shadow-sm px-4 py-2 bg-white dark:bg-gray-800 text-base font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
-              >
-                Close
-              </button>
+              </form>
             </div>
           </div>
         </div>
       )}
 
       {/* Terminate Tenant Modal */}
-      {showTerminateModal && terminatingTenant && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="inline-block align-bottom bg-white dark:bg-gray-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full max-h-screen overflow-y-auto">
-            <form onSubmit={handleTerminationSubmit}>
-              <div className="bg-white dark:bg-gray-800 px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                <div className="mb-4">
-                  <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
-                    Terminate Tenant: {terminatingTenant.full_name}
-                  </h3>
+      {showTerminateModal && selectedTenant && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
+              <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
+            </div>
 
+            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+              <form onSubmit={handleTerminate}>
+                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                  <div className="flex items-center mb-4">
+                    <AlertTriangle className="h-6 w-6 text-red-600 mr-2" />
+                    <h3 className="text-lg font-medium text-gray-900">Terminate Tenant</h3>
+                  </div>
+                  
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
                         Termination Date *
                       </label>
                       <input
                         type="date"
+                        value={terminationData.terminationDate}
+                        onChange={(e) => setTerminationData(prev => ({...prev, terminationDate: e.target.value}))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         required
-                        value={terminationFormData.terminationDate}
-                        onChange={(e) => setTerminationFormData({...terminationFormData, terminationDate: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
                         Termination Reason *
                       </label>
-                      <select
+                      <textarea
+                        value={terminationData.terminationReason}
+                        onChange={(e) => setTerminationData(prev => ({...prev, terminationReason: e.target.value}))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        rows={3}
                         required
-                        value={terminationFormData.terminationReason}
-                        onChange={(e) => setTerminationFormData({...terminationFormData, terminationReason: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
-                      >
-                        <option value="">Select reason</option>
-                        <option value="lease_expired">Lease Expired</option>
-                        <option value="tenant_request">Tenant Request</option>
-                        <option value="non_payment">Non-Payment</option>
-                        <option value="lease_violation">Lease Violation</option>
-                        <option value="property_sale">Property Sale</option>
-                        <option value="other">Other</option>
-                      </select>
+                        placeholder="Reason for termination..."
+                      />
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
                         Security Deposit Action *
                       </label>
                       <select
+                        value={terminationData.securityDepositAction}
+                        onChange={(e) => setTerminationData(prev => ({...prev, securityDepositAction: e.target.value}))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         required
-                        value={terminationFormData.securityDepositAction}
-                        onChange={(e) => setTerminationFormData({...terminationFormData, securityDepositAction: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
                       >
                         <option value="return_full">Return Full Deposit</option>
                         <option value="return_partial">Return Partial Deposit</option>
@@ -762,384 +1031,164 @@ const Tenants: React.FC = () => {
                       </select>
                     </div>
 
-                    {terminationFormData.securityDepositAction === 'return_partial' && (
+                    {terminationData.securityDepositAction === 'return_partial' && (
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                          Partial Return Amount
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Partial Return Amount *
                         </label>
                         <input
                           type="number"
-                          min="0"
                           step="0.01"
-                          value={terminationFormData.partialReturnAmount}
-                          onChange={(e) => setTerminationFormData({...terminationFormData, partialReturnAmount: e.target.value})}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
+                          value={terminationData.partialReturnAmount}
+                          onChange={(e) => setTerminationData(prev => ({...prev, partialReturnAmount: e.target.value}))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          required
+                          placeholder="0.00"
                         />
                       </div>
                     )}
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                        Deductions
-                      </label>
-                      {terminationFormData.deductions.map((deduction, index) => (
-                        <div key={index} className="flex space-x-2 mb-2">
-                          <input
-                            type="text"
-                            placeholder="Description"
-                            value={deduction.description}
-                            onChange={(e) => updateDeduction(index, 'description', e.target.value)}
-                            className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
-                          />
-                          <input
-                            type="number"
-                            placeholder="Amount"
-                            min="0"
-                            step="0.01"
-                            value={deduction.amount}
-                            onChange={(e) => updateDeduction(index, 'amount', parseFloat(e.target.value) || 0)}
-                            className="w-24 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => removeDeduction(index)}
-                            className="px-3 py-2 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={addDeduction}
-                        className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 text-sm"
-                      >
-                        + Add Deduction
-                      </button>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
                         Additional Notes
                       </label>
                       <textarea
-                        value={terminationFormData.notes}
-                        onChange={(e) => setTerminationFormData({...terminationFormData, notes: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
+                        value={terminationData.notes}
+                        onChange={(e) => setTerminationData(prev => ({...prev, notes: e.target.value}))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         rows={3}
+                        placeholder="Additional notes..."
                       />
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="bg-gray-50 dark:bg-gray-700 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                <button
-                  type="submit"
-                  className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:ml-3 sm:w-auto sm:text-sm"
-                >
-                  Terminate Tenant
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowTerminateModal(false);
-                    setTerminatingTenant(null);
-                  }}
-                  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 dark:border-gray-600 shadow-sm px-4 py-2 bg-white dark:bg-gray-800 text-base font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
+                <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                  <button
+                    type="submit"
+                    className="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:ml-3 sm:w-auto sm:text-sm"
+                  >
+                    Terminate Tenant
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowTerminateModal(false);
+                      setSelectedTenant(null);
+                      resetTerminationForm();
+                    }}
+                    className="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Add/Edit Tenant Modal */}
-      {(showAddModal || editingTenant) && (
+      {/* Renew Lease Modal */}
+      {showRenewModal && selectedTenant && (
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
             <div className="fixed inset-0 transition-opacity" aria-hidden="true">
               <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
             </div>
 
-            <div className="inline-block align-bottom bg-white dark:bg-gray-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full max-h-screen overflow-y-auto">
-              <form onSubmit={handleSubmit}>
-                <div className="bg-white dark:bg-gray-800 px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                  <div className="mb-4">
-                    <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">{editingTenant ? 'Edit Tenant' : 'Add New Tenant'}</h3>
+            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+              <form onSubmit={handleRenewLease}>
+                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                  <div className="flex items-center mb-4">
+                    <RefreshCw className="h-6 w-6 text-green-600 mr-2" />
+                    <h3 className="text-lg font-medium text-gray-900">Renew Lease</h3>
+                  </div>
+                  
+                  <div className="mb-4 p-4 bg-blue-50 rounded-lg">
+                    <h4 className="font-medium text-blue-900">Current Contract</h4>
+                    <p className="text-sm text-blue-800">
+                      {selectedTenant.full_name} - {selectedTenant.property_name} Unit {selectedTenant.unit_number}
+                    </p>
+                    <p className="text-sm text-blue-800">
+                      Current End Date: {selectedTenant.contract_end_date ? new Date(selectedTenant.contract_end_date).toLocaleDateString() : 'N/A'}
+                    </p>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        New End Date *
+                      </label>
+                      <input
+                        type="date"
+                        value={renewalData.newEndDate}
+                        onChange={(e) => setRenewalData(prev => ({...prev, newEndDate: e.target.value}))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        required
+                      />
+                    </div>
 
-                    <div className="space-y-6">
-                      {/* Basic Information */}
+                    <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <h4 className="text-md font-medium text-gray-800 dark:text-gray-200 mb-3">Basic Information</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                              Tenant ID *
-                            </label>
-                            <input
-                              type="text"
-                              name="tenantId"
-                              required
-                              value={formData.tenantId}
-                              onChange={handleInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
-                              placeholder="e.g., TNT001"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                              Full Name *
-                            </label>
-                            <input
-                              type="text"
-                              name="fullName"
-                              required
-                              value={formData.fullName}
-                              onChange={handleInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
-                              placeholder="Enter full name"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                              Sex *
-                            </label>
-                            <select
-                              name="sex"
-                              required
-                              value={formData.sex}
-                              onChange={handleInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
-                            >
-                              <option value="Male">Male</option>
-                              <option value="Female">Female</option>
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                              Phone Number *
-                            </label>
-                            <input
-                              type="tel"
-                              name="phone"
-                              required
-                              value={formData.phone}
-                              onChange={handleInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
-                              placeholder="09XXXXXXXX or 07XXXXXXXX"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                              City *
-                            </label>
-                            <input
-                              type="text"
-                              name="city"
-                              required
-                              value={formData.city}
-                              onChange={handleInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
-                              placeholder="Enter city"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                              Sub City *
-                            </label>
-                            <input
-                              type="text"
-                              name="subcity"
-                              required
-                              value={formData.subcity}
-                              onChange={handleInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
-                              placeholder="Enter sub city"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                              Woreda *
-                            </label>
-                            <input
-                              type="text"
-                              name="woreda"
-                              required
-                              value={formData.woreda}
-                              onChange={handleInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
-                              placeholder="Enter woreda"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                              House No *
-                            </label>
-                            <input
-                              type="text"
-                              name="houseNo"
-                              required
-                              value={formData.houseNo}
-                              onChange={handleInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
-                              placeholder="Enter house number"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="mt-4">
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            Organization
-                          </label>
-                          <input
-                            type="text"
-                            name="organization"
-                            value={formData.organization}
-                            onChange={handleInputChange}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
-                            placeholder="Organization (optional)"
-                          />
-                        </div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Monthly Rent *
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={renewalData.monthlyRent}
+                          onChange={(e) => setRenewalData(prev => ({...prev, monthlyRent: e.target.value}))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          required
+                          placeholder="1000.00"
+                        />
                       </div>
 
-                      {/* Agent Information */}
                       <div>
-                        <div className="flex items-center mb-3">
-                          <input
-                            type="checkbox"
-                            name="hasAgent"
-                            checked={formData.hasAgent}
-                            onChange={handleInputChange}
-                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded dark:bg-gray-700 dark:border-gray-600"
-                          />
-                          <label className="ml-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Tenant has an agent
-                          </label>
-                        </div>
-
-                        {formData.hasAgent && (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                Agent Full Name *
-                              </label>
-                              <input
-                                type="text"
-                                name="agentFullName"
-                                required={formData.hasAgent}
-                                value={formData.agentFullName}
-                                onChange={handleInputChange}
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
-                                placeholder="Enter agent name"
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                Agent Sex *
-                              </label>
-                              <select
-                                name="agentSex"
-                                required={formData.hasAgent}
-                                value={formData.agentSex}
-                                onChange={handleInputChange}
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
-                              >
-                                <option value="Male">Male</option>
-                                <option value="Female">Female</option>
-                              </select>
-                            </div>
-
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                Agent Phone *
-                              </label>
-                              <input
-                                type="tel"
-                                name="agentPhone"
-                                required={formData.hasAgent}
-                                value={formData.agentPhone}
-                                onChange={handleInputChange}
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
-                                placeholder="Agent phone number"
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                Agent City *
-                              </label>
-                              <input
-                                type="text"
-                                name="agentCity"
-                                required={formData.hasAgent}
-                                value={formData.agentCity}
-                                onChange={handleInputChange}
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
-                                placeholder="Agent city"
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                Authentication No *
-                              </label>
-                              <input
-                                type="text"
-                                name="authenticationNo"
-                                required={formData.hasAgent}
-                                value={formData.authenticationNo}
-                                onChange={handleInputChange}
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
-                                placeholder="Authentication number"
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                Authentication Date *
-                              </label>
-                              <input
-                                type="date"
-                                name="authenticationDate"
-                                required={formData.hasAgent}
-                                value={formData.authenticationDate}
-                                onChange={handleInputChange}
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-gray-100"
-                              />
-                            </div>
-                          </div>
-                        )}
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Security Deposit
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={renewalData.deposit}
+                          onChange={(e) => setRenewalData(prev => ({...prev, deposit: e.target.value}))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          placeholder="2000.00"
+                        />
                       </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Renewal Notes
+                      </label>
+                      <textarea
+                        value={renewalData.notes}
+                        onChange={(e) => setRenewalData(prev => ({...prev, notes: e.target.value}))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        rows={3}
+                        placeholder="Notes about the renewal..."
+                      />
                     </div>
                   </div>
                 </div>
 
-                <div className="bg-gray-50 dark:bg-gray-700 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
                   <button
                     type="submit"
-                    className="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm dark:bg-blue-700 dark:hover:bg-blue-600"
+                    className="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 bg-green-600 text-base font-medium text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 sm:ml-3 sm:w-auto sm:text-sm"
                   >
-                    {editingTenant ? 'Update Tenant' : 'Add Tenant'}
+                    Renew Lease
                   </button>
                   <button
                     type="button"
                     onClick={() => {
-                      setShowAddModal(false);
-                      setEditingTenant(null);
-                      resetForm();
+                      setShowRenewModal(false);
+                      setSelectedTenant(null);
+                      resetRenewalForm();
                     }}
-                    className="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                    className="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
                   >
                     Cancel
                   </button>

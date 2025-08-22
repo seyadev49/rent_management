@@ -1,7 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useApiWithLimitCheck } from '../hooks/useApiWithLimitCheck';
-import { Building2, Plus, Edit, Trash2, MapPin, FileText, Home } from 'lucide-react';
+import { 
+  Building2, 
+  Plus, 
+  Search, 
+  MapPin, 
+  Users, 
+  Edit, 
+  Trash2, 
+  Eye,
+  Home,
+  DollarSign
+} from 'lucide-react';
 
 interface Property {
   id: number;
@@ -10,75 +21,37 @@ interface Property {
   address: string;
   city: string;
   subcity: string;
-  woreda?: string;
-  description?: string;
+  woreda: string;
+  description: string;
   total_units: number;
   occupied_units: number;
   vacant_units: number;
+  amenities: string[];
   created_at: string;
-  amenities?: string[];
-  units?: any[];
 }
 
 interface Unit {
   id: number;
   unit_number: string;
-  floor_number?: number;
-  room_count?: number;
+  floor_number: number;
+  room_count: number;
   monthly_rent: number;
   deposit: number;
   is_occupied: boolean;
-  tenant_name?: string;
-}
-interface Contract {
-  id: number;
-  tenant_name: string;
-  property_name: string;
-  unit_number: string;
-  monthly_rent: number;
-  status: string;
 }
 
 const Properties: React.FC = () => {
-  const { user, token } = useAuth();
+  const { token } = useAuth();
   const { apiCall } = useApiWithLimitCheck();
   const [properties, setProperties] = useState<Property[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [showUnitsModal, setShowUnitsModal] = useState(false);
   const [showAddUnitModal, setShowAddUnitModal] = useState(false);
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
-  const [propertyUnits, setPropertyUnits] = useState<Unit[]>([]);
-  const [showContractModal, setShowContractModal] = useState(false);
-  const [availableUnits, setAvailableUnits] = useState<any[]>([]);
-  const [tenants, setTenants] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [editingProperty, setEditingProperty] = useState<Property | null>(null); // State to track editing
-  const [formLoading, setFormLoading] = useState(false); // For submission loading state
-
-  const [unitFormData, setUnitFormData] = useState({
-    propertyId: '',
-    unitNumber: '',
-    floorNumber: '',
-    roomCount: '',
-    monthlyRent: '',
-    deposit: '',
-  });
-  const [contractFormData, setContractFormData] = useState({
-    propertyId: '',
-    unitId: '',
-    tenantId: '',
-    leaseDuration: 12,
-    contractStartDate: new Date().toISOString().split('T')[0],
-    contractEndDate: '',
-    monthlyRent: '',
-    deposit: '',
-    paymentTerm: 1,
-    rentStartDate: new Date().toISOString().split('T')[0],
-    rentEndDate: '',
-    eeuPayment: 0,
-    waterPayment: 0,
-    generatorPayment: 0,
-  });
+  const [selectedPropertyUnits, setSelectedPropertyUnits] = useState<Unit[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     type: 'apartment',
@@ -87,18 +60,21 @@ const Properties: React.FC = () => {
     subcity: '',
     woreda: '',
     description: '',
-    totalUnits: 1,
     amenities: [] as string[],
-    units: [] as any[],
+  });
+  const [unitFormData, setUnitFormData] = useState({
+    unitNumber: '',
+    floorNumber: '',
+    roomCount: '',
+    monthlyRent: '',
+    deposit: '',
   });
 
   useEffect(() => {
     fetchProperties();
-    fetchTenants();
   }, [token]);
 
   const fetchProperties = async () => {
-    setLoading(true);
     try {
       const response = await fetch('http://localhost:5000/api/properties', {
         headers: {
@@ -109,8 +85,6 @@ const Properties: React.FC = () => {
       if (response.ok) {
         const data = await response.json();
         setProperties(data.properties);
-      } else {
-        console.error('Failed to fetch properties:', response.status);
       }
     } catch (error) {
       console.error('Failed to fetch properties:', error);
@@ -121,254 +95,28 @@ const Properties: React.FC = () => {
 
   const fetchPropertyUnits = async (propertyId: number) => {
     try {
-      const makeApiCall = async () => {
-        return await fetch(`http://localhost:5000/api/units?propertyId=${propertyId}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-      };
-      const response = await apiCall(makeApiCall, 'units');
+      const response = await fetch(`http://localhost:5000/api/properties/${propertyId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
 
       if (response.ok) {
         const data = await response.json();
-        setPropertyUnits(data.units);
-      } else {
-        console.error("Failed to fetch property units, possibly due to limit:", response.status);
+        setSelectedPropertyUnits(data.property.units || []);
       }
     } catch (error) {
       console.error('Failed to fetch property units:', error);
-    }
-  };
-  const fetchTenants = async () => {
-    try {
-      const makeApiCall = async () => {
-        return await fetch('http://localhost:5000/api/tenants', {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-      };
-      const response = await apiCall(makeApiCall, 'tenants');
-
-      if (response.ok) {
-        const data = await response.json();
-        setTenants(data.tenants);
-      } else {
-        console.error("Failed to fetch tenants, possibly due to limit:", response.status);
-      }
-    } catch (error) {
-      console.error('Failed to fetch tenants:', error);
-    }
-  };
-
-  const fetchAvailableUnits = async (propertyId: number) => {
-    try {
-      const makeApiCall = async () => {
-        return await fetch(`http://localhost:5000/api/units?propertyId=${propertyId}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-      };
-      const response = await apiCall(makeApiCall, 'units');
-
-      if (response.ok) {
-        const data = await response.json();
-        const vacantUnits = data.units?.filter((unit: any) => !unit.is_occupied) || [];
-        setAvailableUnits(vacantUnits);
-      } else {
-        console.error("Failed to fetch available units, possibly due to limit:", response.status);
-      }
-    } catch (error) {
-      console.error('Failed to fetch property units:', error);
-    }
-  };
-
-  const handleViewUnits = (property: Property) => {
-    setSelectedProperty(property);
-    fetchPropertyUnits(property.id);
-    setShowUnitsModal(true);
-  };
-
-  const handleAddUnit = (property: Property) => {
-    setSelectedProperty(property);
-    setUnitFormData(prev => ({
-      ...prev,
-      propertyId: property.id.toString(),
-    }));
-    setShowAddUnitModal(true);
-  };
-
-  const handleUnitSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    try {
-      const makeApiCall = async () => {
-        const response = await fetch('http://localhost:5000/api/units', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            ...unitFormData,
-            floorNumber: unitFormData.floorNumber ? parseInt(unitFormData.floorNumber) : null,
-            roomCount: unitFormData.roomCount ? parseInt(unitFormData.roomCount) : null,
-            monthlyRent: parseFloat(unitFormData.monthlyRent),
-            deposit: parseFloat(unitFormData.deposit),
-          }),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw { response: { status: response.status, data: errorData } };
-        }
-        return response.json();
-      };
-
-      const result = await apiCall(makeApiCall, 'units');
-
-      if (result) {
-        setShowAddUnitModal(false);
-        resetUnitForm();
-        fetchProperties();
-        if (showUnitsModal && selectedProperty) {
-          fetchPropertyUnits(selectedProperty.id);
-        }
-      }
-    } catch (error: any) {
-      console.error('Failed to create unit:', error);
-      if (error?.response?.status !== 403) {
-        alert('Failed to create unit');
-      }
-    }
-  };
-
-  const resetUnitForm = () => {
-    setUnitFormData({
-      propertyId: '',
-      unitNumber: '',
-      floorNumber: '',
-      roomCount: '',
-      monthlyRent: '',
-      deposit: '',
-    });
-  };
-  const handleCreateContract = (property: Property) => {
-    setSelectedProperty(property);
-    setContractFormData(prev => ({
-      ...prev,
-      propertyId: property.id.toString(),
-    }));
-    fetchAvailableUnits(property.id);
-    setShowContractModal(true);
-  };
-
-  const handleContractSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    try {
-      const makeApiCall = async () => {
-        return await fetch('http://localhost:5000/api/contracts', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(contractFormData),
-        });
-      };
-      const response = await apiCall(makeApiCall, 'contracts');
-
-      if (response.ok) {
-        setShowContractModal(false);
-        resetContractForm();
-        fetchProperties(); // Refresh to update occupancy
-      } else {
-        console.error("Failed to create contract, possibly due to limit:", response.status);
-      }
-    } catch (error) {
-      console.error('Failed to create contract:', error);
-    }
-  };
-
-  const resetContractForm = () => {
-    setContractFormData({
-      propertyId: '',
-      unitId: '',
-      tenantId: '',
-      leaseDuration: 12,
-      contractStartDate: new Date().toISOString().split('T')[0],
-      contractEndDate: '',
-      monthlyRent: '',
-      deposit: '',
-      paymentTerm: 1,
-      rentStartDate: new Date().toISOString().split('T')[0],
-      rentEndDate: '',
-      eeuPayment: 0,
-      waterPayment: 0,
-      generatorPayment: 0,
-    });
-  };
-
-  const handleUnitInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setUnitFormData(prev => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
-  const handleContractInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setContractFormData(prev => ({
-      ...prev,
-      [name]: name === 'leaseDuration' || name === 'paymentTerm' ? parseInt(value) : value,
-    }));
-
-    // Auto-calculate end dates
-    if (name === 'contractStartDate' || name === 'leaseDuration') {
-      const startDate = name === 'contractStartDate' ? new Date(value) : new Date(contractFormData.contractStartDate);
-      const duration = name === 'leaseDuration' ? parseInt(value) : contractFormData.leaseDuration;
-
-      if (startDate && duration) {
-        const endDate = new Date(startDate);
-        endDate.setMonth(endDate.getMonth() + duration);
-        setContractFormData(prev => ({
-          ...prev,
-          contractEndDate: endDate.toISOString().split('T')[0],
-          rentEndDate: endDate.toISOString().split('T')[0],
-        }));
-      }
-    }
-
-    // Auto-fill rent amount from selected unit
-    if (name === 'unitId' && value) {
-      const selectedUnit = availableUnits.find(unit => unit.id === parseInt(value));
-      if (selectedUnit) {
-        setContractFormData(prev => ({
-          ...prev,
-          monthlyRent: selectedUnit.monthly_rent.toString(),
-          deposit: selectedUnit.deposit.toString(),
-        }));
-      }
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setFormLoading(true);
-
+    
     try {
-      const url = editingProperty
-        ? `http://localhost:5000/api/properties/${editingProperty.id}`
-        : 'http://localhost:5000/api/properties';
-
-      const method = editingProperty ? 'PUT' : 'POST';
-
-      const makeApiCall = async () => {
-        const response = await fetch(url, {
-          method,
+      const createFn = async () => {
+        const response = await fetch('http://localhost:5000/api/properties', {
+          method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
@@ -383,43 +131,192 @@ const Properties: React.FC = () => {
         return response.json();
       };
 
-      const result = await apiCall(makeApiCall, 'properties');
+      const result = await apiCall(createFn, 'properties');
 
       if (result) {
-        fetchProperties();
         setShowAddModal(false);
-        setEditingProperty(null);
-        setSelectedProperty(null);
-        setFormData({
-          name: '',
-          type: 'apartment',
-          address: '',
-          city: '',
-          subcity: '',
-          woreda: '',
-          description: '',
-          totalUnits: 1,
-          amenities: [],
-          units: [],
-        });
+        resetForm();
+        fetchProperties();
       }
     } catch (error: any) {
-      console.error('Failed to save property:', error);
+      console.error('Failed to create property:', error);
       if (error?.response?.status !== 403) {
-        alert(error?.response?.data?.message || 'Failed to save property');
+        alert('Failed to create property');
       }
-    } finally {
-      setFormLoading(false);
     }
+  };
+
+  const handleUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!selectedProperty) return;
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/properties/${selectedProperty.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(formData),
+      });
+
+      if (response.ok) {
+        setShowEditModal(false);
+        setSelectedProperty(null);
+        resetForm();
+        fetchProperties();
+      }
+    } catch (error) {
+      console.error('Failed to update property:', error);
+      alert('Failed to update property');
+    }
+  };
+
+  const handleDelete = async (propertyId: number) => {
+    if (!confirm('Are you sure you want to delete this property?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/properties/${propertyId}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        fetchProperties();
+      }
+    } catch (error) {
+      console.error('Failed to delete property:', error);
+      alert('Failed to delete property');
+    }
+  };
+
+  const handleAddUnit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!selectedProperty) return;
+
+    try {
+      const response = await fetch('http://localhost:5000/api/units', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          propertyId: selectedProperty.id,
+          unitNumber: unitFormData.unitNumber,
+          floorNumber: unitFormData.floorNumber ? parseInt(unitFormData.floorNumber) : null,
+          roomCount: unitFormData.roomCount ? parseInt(unitFormData.roomCount) : null,
+          monthlyRent: parseFloat(unitFormData.monthlyRent),
+          deposit: parseFloat(unitFormData.deposit),
+        }),
+      });
+
+      if (response.ok) {
+        setShowAddUnitModal(false);
+        resetUnitForm();
+        fetchPropertyUnits(selectedProperty.id);
+      }
+    } catch (error) {
+      console.error('Failed to add unit:', error);
+      alert('Failed to add unit');
+    }
+  };
+
+  const handleDeleteUnit = async (unitId: number) => {
+    if (!confirm('Are you sure you want to delete this unit?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/units/${unitId}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        if (selectedProperty) {
+          fetchPropertyUnits(selectedProperty.id);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to delete unit:', error);
+      alert('Failed to delete unit');
+    }
+  };
+
+  const resetForm = () => {
+    setFormData({
+      name: '',
+      type: 'apartment',
+      address: '',
+      city: '',
+      subcity: '',
+      woreda: '',
+      description: '',
+      amenities: [],
+    });
+  };
+
+  const resetUnitForm = () => {
+    setUnitFormData({
+      unitNumber: '',
+      floorNumber: '',
+      roomCount: '',
+      monthlyRent: '',
+      deposit: '',
+    });
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
-      [name]: name === 'totalUnits' ? parseInt(value) : value,
+      [name]: value,
     }));
   };
+
+  const handleUnitInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setUnitFormData(prev => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  const openEditModal = (property: Property) => {
+    setSelectedProperty(property);
+    setFormData({
+      name: property.name,
+      type: property.type,
+      address: property.address,
+      city: property.city,
+      subcity: property.subcity || '',
+      woreda: property.woreda || '',
+      description: property.description || '',
+      amenities: property.amenities || [],
+    });
+    setShowEditModal(true);
+  };
+
+  const openUnitsModal = async (property: Property) => {
+    setSelectedProperty(property);
+    await fetchPropertyUnits(property.id);
+    setShowUnitsModal(true);
+  };
+
+  const filteredProperties = properties.filter(property =>
+    property.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    property.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    property.city.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   if (loading) {
     return (
@@ -434,25 +331,10 @@ const Properties: React.FC = () => {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Properties</h1>
-          <p className="text-gray-600">Manage your rental properties</p>
+          <p className="text-gray-600">Manage your rental properties and units</p>
         </div>
         <button
-          onClick={() => {
-            setEditingProperty(null); // Ensure we are adding a new property
-            setFormData({ // Reset form data for new property
-              name: '',
-              type: 'apartment',
-              address: '',
-              city: '',
-              subcity: '',
-              woreda: '',
-              description: '',
-              totalUnits: 1,
-              amenities: [],
-              units: [],
-            });
-            setShowAddModal(true);
-          }}
+          onClick={() => setShowAddModal(true)}
           className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200"
         >
           <Plus className="h-4 w-4 mr-2" />
@@ -460,117 +342,95 @@ const Properties: React.FC = () => {
         </button>
       </div>
 
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+        <input
+          type="text"
+          placeholder="Search properties..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        />
+      </div>
+
       {/* Properties Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {properties.map((property) => (
-          <div key={property.id} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow duration-200">
-            <div className="h-48 bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
-              <Building2 className="h-16 w-16 text-white opacity-80" />
+        {filteredProperties.map((property) => (
+          <div key={property.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow duration-200">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-1">{property.name}</h3>
+                <p className="text-sm text-gray-600 capitalize">{property.type}</p>
+              </div>
+              <div className="flex space-x-2">
+                <button
+                  onClick={() => openUnitsModal(property)}
+                  className="text-blue-600 hover:text-blue-800"
+                  title="View Units"
+                >
+                  <Eye className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => openEditModal(property)}
+                  className="text-yellow-600 hover:text-yellow-800"
+                  title="Edit Property"
+                >
+                  <Edit className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => handleDelete(property.id)}
+                  className="text-red-600 hover:text-red-800"
+                  title="Delete Property"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-lg font-semibold text-gray-900">{property.name}</h3>
-                <span className="inline-flex px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full">
-                  {property.type}
-                </span>
-              </div>
-
-              <div className="flex items-center text-sm text-gray-600 mb-3">
-                <MapPin className="h-4 w-4 mr-1" />
-                {property.city}, {property.subcity}
-              </div>
-
-              <div className="grid grid-cols-3 gap-4 mb-4">
-                <div className="text-center">
-                  <p className="text-lg font-semibold text-gray-900">{property.total_units}</p>
-                  <p className="text-xs text-gray-600">Total Units</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-lg font-semibold text-green-600">{property.occupied_units}</p>
-                  <p className="text-xs text-gray-600">Occupied</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-lg font-semibold text-blue-600">{property.vacant_units}</p>
-                  <p className="text-xs text-gray-600">Vacant</p>
-                </div>
+            <div className="space-y-3">
+              <div className="flex items-center text-sm text-gray-600">
+                <MapPin className="h-4 w-4 mr-2" />
+                <span className="truncate">{property.address}, {property.city}</span>
               </div>
 
               <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <button
-                    onClick={() => {
-                      setEditingProperty(property);
-                      setFormData({
-                        name: property.name,
-                        type: property.type,
-                        address: property.address,
-                        city: property.city,
-                        subcity: property.subcity,
-                        woreda: property.woreda || '',
-                        description: property.description || '',
-                        totalUnits: property.total_units,
-                        amenities: property.amenities || [],
-                        units: property.units || [],
-                      });
-                      setSelectedProperty(property);
-                      setShowAddModal(true);
-                    }}
-                    className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors duration-200"
-                  >
-                    <Edit className="h-4 w-4" />
-                  </button>
-                  <button className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors duration-200">
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                <div className="flex items-center text-sm text-gray-600">
+                  <Home className="h-4 w-4 mr-2" />
+                  <span>{property.total_units} units</span>
                 </div>
-
-                <div className="flex items-center space-x-2">
-                  <button
-                    onClick={() => handleViewUnits(property)}
-                    className="flex items-center px-3 py-1 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors duration-200"
-                  >
-                    <Home className="h-4 w-4 mr-1" />
-                    View Units
-                  </button>
-                  <button
-                    onClick={() => handleAddUnit(property)}
-                    className="flex items-center px-3 py-1 text-sm text-green-600 hover:bg-green-50 rounded-lg transition-colors duration-200"
-                  >
-                    <Plus className="h-4 w-4 mr-1" />
-                    Add Unit
-                  </button>
+                <div className="flex items-center text-sm text-gray-600">
+                  <Users className="h-4 w-4 mr-2" />
+                  <span>{property.occupied_units} occupied</span>
                 </div>
               </div>
 
-              <div className="mt-3 pt-3 border-t border-gray-200">
-                <button
-                  onClick={() => handleCreateContract(property)}
-                  className="w-full flex items-center justify-center px-3 py-2 text-sm text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors duration-200"
-                >
-                  <FileText className="h-4 w-4 mr-1" />
-                  New Contract
-                </button>
+              {property.description && (
+                <p className="text-sm text-gray-600 line-clamp-2">{property.description}</p>
+              )}
+            </div>
+
+            <div className="mt-4 pt-4 border-t border-gray-200">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-500">Occupancy Rate</span>
+                <span className="text-sm font-medium text-gray-900">
+                  {property.total_units > 0 ? Math.round((property.occupied_units / property.total_units) * 100) : 0}%
+                </span>
               </div>
             </div>
           </div>
         ))}
       </div>
 
-      {properties.length === 0 && (
+      {filteredProperties.length === 0 && (
         <div className="text-center py-12">
           <Building2 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">No properties yet</h3>
-          <p className="text-gray-600 mb-4">Get started by adding your first property</p>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">No properties found</h3>
+          <p className="text-gray-600 mb-4">
+            {searchTerm ? 'Try adjusting your search criteria' : 'Get started by adding your first property'}
+          </p>
           <button
-            onClick={() => {
-              setEditingProperty(null);
-              setFormData({
-                name: '', type: 'apartment', address: '', city: '', subcity: '',
-                woreda: '', description: '', totalUnits: 1, amenities: [], units: [],
-              });
-              setShowAddModal(true);
-            }}
+            onClick={() => setShowAddModal(true)}
             className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200"
           >
             <Plus className="h-4 w-4 mr-2" />
@@ -579,7 +439,300 @@ const Properties: React.FC = () => {
         </div>
       )}
 
-      {/* View Units Modal */}
+      {/* Add Property Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
+              <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
+            </div>
+
+            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+              <form onSubmit={handleSubmit}>
+                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                  <div className="mb-4">
+                    <h3 className="text-lg font-medium text-gray-900 mb-4">Add New Property</h3>
+                    
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Property Name *
+                        </label>
+                        <input
+                          type="text"
+                          name="name"
+                          required
+                          value={formData.name}
+                          onChange={handleInputChange}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          placeholder="Enter property name"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Property Type *
+                        </label>
+                        <select
+                          name="type"
+                          required
+                          value={formData.type}
+                          onChange={handleInputChange}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        >
+                          <option value="apartment">Apartment</option>
+                          <option value="house">House</option>
+                          <option value="shop">Shop</option>
+                          <option value="office">Office</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Address *
+                        </label>
+                        <input
+                          type="text"
+                          name="address"
+                          required
+                          value={formData.address}
+                          onChange={handleInputChange}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          placeholder="Enter property address"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            City *
+                          </label>
+                          <input
+                            type="text"
+                            name="city"
+                            required
+                            value={formData.city}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="City"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Subcity
+                          </label>
+                          <input
+                            type="text"
+                            name="subcity"
+                            value={formData.subcity}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="Subcity"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Woreda
+                          </label>
+                          <input
+                            type="text"
+                            name="woreda"
+                            value={formData.woreda}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="Woreda"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Description
+                        </label>
+                        <textarea
+                          name="description"
+                          value={formData.description}
+                          onChange={handleInputChange}
+                          rows={3}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          placeholder="Property description..."
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                  <button
+                    type="submit"
+                    className="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm"
+                  >
+                    Add Property
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddModal(false);
+                      resetForm();
+                    }}
+                    className="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Property Modal */}
+      {showEditModal && selectedProperty && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
+              <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
+            </div>
+
+            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+              <form onSubmit={handleUpdate}>
+                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                  <div className="mb-4">
+                    <h3 className="text-lg font-medium text-gray-900 mb-4">Edit Property</h3>
+                    
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Property Name *
+                        </label>
+                        <input
+                          type="text"
+                          name="name"
+                          required
+                          value={formData.name}
+                          onChange={handleInputChange}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Property Type *
+                        </label>
+                        <select
+                          name="type"
+                          required
+                          value={formData.type}
+                          onChange={handleInputChange}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        >
+                          <option value="apartment">Apartment</option>
+                          <option value="house">House</option>
+                          <option value="shop">Shop</option>
+                          <option value="office">Office</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Address *
+                        </label>
+                        <input
+                          type="text"
+                          name="address"
+                          required
+                          value={formData.address}
+                          onChange={handleInputChange}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            City *
+                          </label>
+                          <input
+                            type="text"
+                            name="city"
+                            required
+                            value={formData.city}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Subcity
+                          </label>
+                          <input
+                            type="text"
+                            name="subcity"
+                            value={formData.subcity}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Woreda
+                          </label>
+                          <input
+                            type="text"
+                            name="woreda"
+                            value={formData.woreda}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Description
+                        </label>
+                        <textarea
+                          name="description"
+                          value={formData.description}
+                          onChange={handleInputChange}
+                          rows={3}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                  <button
+                    type="submit"
+                    className="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm"
+                  >
+                    Update Property
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowEditModal(false);
+                      setSelectedProperty(null);
+                      resetForm();
+                    }}
+                    className="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Units Modal */}
       {showUnitsModal && selectedProperty && (
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
@@ -589,14 +742,14 @@ const Properties: React.FC = () => {
 
             <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-4xl sm:w-full">
               <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center justify-between mb-6">
                   <h3 className="text-lg font-medium text-gray-900">
                     Units - {selectedProperty.name}
                   </h3>
-                  <div className="flex items-center space-x-2">
+                  <div className="flex space-x-2">
                     <button
-                      onClick={() => handleAddUnit(selectedProperty)}
-                      className="flex items-center px-3 py-1 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200"
+                      onClick={() => setShowAddUnitModal(true)}
+                      className="flex items-center px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200"
                     >
                       <Plus className="h-4 w-4 mr-1" />
                       Add Unit
@@ -605,106 +758,64 @@ const Properties: React.FC = () => {
                       onClick={() => setShowUnitsModal(false)}
                       className="text-gray-400 hover:text-gray-600"
                     >
-                      ×
+                      <X className="h-6 w-6" />
                     </button>
                   </div>
                 </div>
 
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Unit
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Details
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Rent
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Status
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Tenant
-                        </th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {propertyUnits.map((unit) => (
-                        <tr key={unit.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm font-medium text-gray-900">
-                              Unit {unit.unit_number}
-                            </div>
-                            {unit.floor_number && (
-                              <div className="text-sm text-gray-500">
-                                Floor {unit.floor_number}
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            {unit.room_count && (
-                              <div className="text-sm text-gray-900">
-                                {unit.room_count} rooms
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm font-medium text-gray-900">
-                              ${unit.monthly_rent}/mo
-                            </div>
-                            <div className="text-sm text-gray-500">
-                              Deposit: ${unit.deposit}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
-                              unit.is_occupied
-                                ? 'bg-red-100 text-red-800'
-                                : 'bg-green-100 text-green-800'
-                            }`}>
-                              {unit.is_occupied ? 'Occupied' : 'Vacant'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm text-gray-900">
-                              {unit.tenant_name || '-'}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                            <div className="flex items-center justify-end space-x-2">
-                              <button className="text-indigo-600 hover:text-indigo-900">
-                                <Edit className="h-4 w-4" />
-                              </button>
-                              {!unit.is_occupied && (
-                                <button className="text-red-600 hover:text-red-900">
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-96 overflow-y-auto">
+                  {selectedPropertyUnits.map((unit) => (
+                    <div key={unit.id} className={`border rounded-lg p-4 ${
+                      unit.is_occupied ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'
+                    }`}>
+                      <div className="flex justify-between items-start mb-2">
+                        <h4 className="font-semibold text-gray-900">Unit {unit.unit_number}</h4>
+                        <div className="flex space-x-1">
+                          <button
+                            onClick={() => handleDeleteUnit(unit.id)}
+                            disabled={unit.is_occupied}
+                            className="text-red-600 hover:text-red-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={unit.is_occupied ? "Cannot delete occupied unit" : "Delete unit"}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div className="space-y-1 text-sm">
+                        {unit.floor_number && (
+                          <p className="text-gray-600">Floor: {unit.floor_number}</p>
+                        )}
+                        {unit.room_count && (
+                          <p className="text-gray-600">Rooms: {unit.room_count}</p>
+                        )}
+                        <div className="flex items-center text-gray-600">
+                          <DollarSign className="h-3 w-3 mr-1" />
+                          <span>${unit.monthly_rent}/month</span>
+                        </div>
+                        <p className="text-gray-600">Deposit: ${unit.deposit}</p>
+                        <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
+                          unit.is_occupied 
+                            ? 'bg-red-100 text-red-800' 
+                            : 'bg-green-100 text-green-800'
+                        }`}>
+                          {unit.is_occupied ? 'Occupied' : 'Vacant'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
 
-                {propertyUnits.length === 0 && (
+                {selectedPropertyUnits.length === 0 && (
                   <div className="text-center py-8">
                     <Home className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">No units yet</h3>
-                    <p className="text-gray-600 mb-4">Add units to this property to get started</p>
+                    <p className="text-gray-600 mb-4">No units added yet</p>
                     <button
-                      onClick={() => handleAddUnit(selectedProperty)}
+                      onClick={() => setShowAddUnitModal(true)}
                       className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200"
                     >
                       <Plus className="h-4 w-4 mr-2" />
-                      Add Unit
+                      Add First Unit
                     </button>
                   </div>
                 )}
@@ -723,13 +834,13 @@ const Properties: React.FC = () => {
             </div>
 
             <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-              <form onSubmit={handleUnitSubmit}>
+              <form onSubmit={handleAddUnit}>
                 <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
                   <div className="mb-4">
                     <h3 className="text-lg font-medium text-gray-900 mb-4">
-                      Add Unit - {selectedProperty.name}
+                      Add Unit to {selectedProperty.name}
                     </h3>
-
+                    
                     <div className="space-y-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -754,11 +865,10 @@ const Properties: React.FC = () => {
                           <input
                             type="number"
                             name="floorNumber"
-                            min="0"
                             value={unitFormData.floorNumber}
                             onChange={handleUnitInputChange}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            placeholder="Floor"
+                            placeholder="1"
                           />
                         </div>
 
@@ -769,11 +879,10 @@ const Properties: React.FC = () => {
                           <input
                             type="number"
                             name="roomCount"
-                            min="1"
                             value={unitFormData.roomCount}
                             onChange={handleUnitInputChange}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            placeholder="Rooms"
+                            placeholder="2"
                           />
                         </div>
                       </div>
@@ -788,11 +897,10 @@ const Properties: React.FC = () => {
                             name="monthlyRent"
                             required
                             step="0.01"
-                            min="0"
                             value={unitFormData.monthlyRent}
                             onChange={handleUnitInputChange}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            placeholder="0.00"
+                            placeholder="1000.00"
                           />
                         </div>
 
@@ -805,11 +913,10 @@ const Properties: React.FC = () => {
                             name="deposit"
                             required
                             step="0.01"
-                            min="0"
                             value={unitFormData.deposit}
                             onChange={handleUnitInputChange}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            placeholder="0.00"
+                            placeholder="2000.00"
                           />
                         </div>
                       </div>
@@ -829,413 +936,6 @@ const Properties: React.FC = () => {
                     onClick={() => {
                       setShowAddUnitModal(false);
                       resetUnitForm();
-                    }}
-                    className="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
-      {/* Add Property Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
-              <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
-            </div>
-
-            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-              <form onSubmit={handleSubmit}>
-                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                  <div className="mb-4">
-                    <h3 className="text-lg font-medium text-gray-900 mb-4">
-                      {editingProperty ? 'Edit Property' : 'Add New Property'}
-                    </h3>
-
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Property Name
-                        </label>
-                        <input
-                          type="text"
-                          name="name"
-                          required
-                          value={formData.name}
-                          onChange={handleInputChange}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          placeholder="Enter property name"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Property Type
-                        </label>
-                        <select
-                          name="type"
-                          value={formData.type}
-                          onChange={handleInputChange}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        >
-                          <option value="apartment">Apartment</option>
-                          <option value="house">House</option>
-                          <option value="shop">Shop</option>
-                          <option value="office">Office</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Address
-                        </label>
-                        <textarea
-                          name="address"
-                          required
-                          value={formData.address}
-                          onChange={handleInputChange}
-                          rows={2}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          placeholder="Enter full address"
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            City
-                          </label>
-                          <input
-                            type="text"
-                            name="city"
-                            required
-                            value={formData.city}
-                            onChange={handleInputChange}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            placeholder="City"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Sub City
-                          </label>
-                          <input
-                            type="text"
-                            name="subcity"
-                            value={formData.subcity}
-                            onChange={handleInputChange}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            placeholder="Sub city"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Description
-                        </label>
-                        <textarea
-                          name="description"
-                          value={formData.description}
-                          onChange={handleInputChange}
-                          rows={3}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          placeholder="Property description"
-                        />
-                      </div>
-
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                        <p className="text-sm text-blue-800">
-                          <strong>Note:</strong> After creating the property, you can add individual units with specific details like rent amounts, floor numbers, and room counts.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                  <button
-                    type="submit"
-                    disabled={formLoading}
-                    className={`w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 text-base font-medium text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm ${
-                      formLoading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
-                    }`}
-                  >
-                    {formLoading ? 'Saving...' : (editingProperty ? 'Update Property' : 'Add Property')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowAddModal(false);
-                      setEditingProperty(null); // Clear editing state on cancel
-                    }}
-                    className="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Create Contract Modal */}
-      {showContractModal && selectedProperty && ( // Ensure selectedProperty is not null
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
-              <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
-            </div>
-
-            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full max-h-screen overflow-y-auto">
-              <form onSubmit={handleContractSubmit}>
-                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                  <div className="mb-4">
-                    <h3 className="text-lg font-medium text-gray-900 mb-4">
-                      Create Contract - {selectedProperty?.name}
-                    </h3>
-
-                    <div className="space-y-6">
-                      {/* Basic Contract Info */}
-                      <div>
-                        <h4 className="text-md font-medium text-gray-800 mb-3">Contract Details</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Unit *
-                            </label>
-                            <select
-                              name="unitId"
-                              required
-                              value={contractFormData.unitId}
-                              onChange={handleContractInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            >
-                              <option value="">Select a unit</option>
-                              {availableUnits.map((unit) => (
-                                <option key={unit.id} value={unit.id}>
-                                  Unit {unit.unit_number} - ${unit.monthly_rent}/month
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Tenant *
-                            </label>
-                            <select
-                              name="tenantId"
-                              required
-                              value={contractFormData.tenantId}
-                              onChange={handleContractInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            >
-                              <option value="">Select a tenant</option>
-                              {tenants.map((tenant) => (
-                                <option key={tenant.id} value={tenant.id}>
-                                  {tenant.full_name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Lease Duration (months) *
-                            </label>
-                            <input
-                              type="number"
-                              name="leaseDuration"
-                              required
-                              min="1"
-                              value={contractFormData.leaseDuration}
-                              onChange={handleContractInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Payment Term (months) *
-                            </label>
-                            <select
-                              name="paymentTerm"
-                              required
-                              value={contractFormData.paymentTerm}
-                              onChange={handleContractInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            >
-                              <option value={1}>Monthly</option>
-                              <option value={3}>Quarterly</option>
-                              <option value={6}>Semi-Annual</option>
-                              <option value={12}>Annual</option>
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Contract Start Date *
-                            </label>
-                            <input
-                              type="date"
-                              name="contractStartDate"
-                              required
-                              value={contractFormData.contractStartDate}
-                              onChange={handleContractInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Contract End Date *
-                            </label>
-                            <input
-                              type="date"
-                              name="contractEndDate"
-                              required
-                              value={contractFormData.contractEndDate}
-                              onChange={handleContractInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Financial Details */}
-                      <div>
-                        <h4 className="text-md font-medium text-gray-800 mb-3">Financial Details</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Monthly Rent *
-                            </label>
-                            <input
-                              type="number"
-                              name="monthlyRent"
-                              required
-                              step="0.01"
-                              value={contractFormData.monthlyRent}
-                              onChange={handleContractInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Security Deposit *
-                            </label>
-                            <input
-                              type="number"
-                              name="deposit"
-                              required
-                              step="0.01"
-                              value={contractFormData.deposit}
-                              onChange={handleContractInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              EEU Payment
-                            </label>
-                            <input
-                              type="number"
-                              name="eeuPayment"
-                              step="0.01"
-                              value={contractFormData.eeuPayment}
-                              onChange={handleContractInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Water Payment
-                            </label>
-                            <input
-                              type="number"
-                              name="waterPayment"
-                              step="0.01"
-                              value={contractFormData.waterPayment}
-                              onChange={handleContractInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Generator Payment
-                            </label>
-                            <input
-                              type="number"
-                              name="generatorPayment"
-                              step="0.01"
-                              value={contractFormData.generatorPayment}
-                              onChange={handleContractInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Rent Period */}
-                      <div>
-                        <h4 className="text-md font-medium text-gray-800 mb-3">Rent Period</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Rent Start Date *
-                            </label>
-                            <input
-                              type="date"
-                              name="rentStartDate"
-                              required
-                              value={contractFormData.rentStartDate}
-                              onChange={handleContractInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Rent End Date *
-                            </label>
-                            <input
-                              type="date"
-                              name="rentEndDate"
-                              required
-                              value={contractFormData.rentEndDate}
-                              onChange={handleContractInputChange}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                  <button
-                    type="submit"
-                    className="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm"
-                  >
-                    Create Contract
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowContractModal(false);
-                      resetContractForm();
                     }}
                     className="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
                   >

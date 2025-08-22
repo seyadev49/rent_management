@@ -1,4 +1,40 @@
 const db = require('../db/connection');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+
+// Configure multer for receipt uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, '../uploads/receipts');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'receipt-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|pdf/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+
+    if (mimetype && extname) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Only images and PDFs are allowed for receipts'));
+    }
+  }
+});
 
 const getSubscriptionPlans = async (req, res) => {
   try {
@@ -81,6 +117,10 @@ const getSubscriptionPlans = async (req, res) => {
 const upgradeSubscription = async (req, res) => {
   try {
     const { planId, paymentMethod, billingCycle = 'monthly' } = req.body;
+    
+    if (!req.file) {
+      return res.status(400).json({ message: 'Payment receipt is required' });
+    }
 
     const plans = [
       { id: 'basic', name: 'Basic Plan', price: 29.99, interval: 'month', limits: { properties: 3, tenants: 50, documents: 100, maintenance_requests: 50 } },
@@ -93,7 +133,11 @@ const upgradeSubscription = async (req, res) => {
       return res.status(400).json({ message: 'Invalid plan selected' });
     }
 
-    const price = selectedPlan.price;
+    // Calculate price based on billing cycle
+    let price = selectedPlan.price;
+    if (billingCycle === 'annual') {
+      price = selectedPlan.price * 10; // 10 months price for 12 months (2 months free)
+    }
 
     // Calculate next renewal date
     const currentDate = new Date();
@@ -103,11 +147,11 @@ const upgradeSubscription = async (req, res) => {
       case 'monthly':
         nextRenewalDate.setMonth(nextRenewalDate.getMonth() + 1);
         break;
-      case 'semi-annual':
-        nextRenewalDate.setMonth(nextRenewalDate.getMonth() + 6);
-        break;
       case 'annual':
         nextRenewalDate.setFullYear(nextRenewalDate.getFullYear() + 1);
+        break;
+      case 'semi-annual':
+        nextRenewalDate.setMonth(nextRenewalDate.getMonth() + 6);
         break;
     }
 
@@ -115,9 +159,10 @@ const upgradeSubscription = async (req, res) => {
     const mysqlDate = nextRenewalDate.toISOString().split('T')[0];
 
     // Update organization subscription
+    // Set status to 'pending_verification' until receipt is verified
     await db.execute(
       `UPDATE organizations 
-       SET subscription_status = 'active', 
+       SET subscription_status = 'pending_verification', 
            subscription_plan = ?,
            subscription_price = ?,
            billing_cycle = ?,
@@ -129,13 +174,13 @@ const upgradeSubscription = async (req, res) => {
 
     // Insert subscription history record
     await db.execute(
-      `INSERT INTO subscription_history (organization_id, plan_id, amount, payment_method, billing_cycle, status, start_date, end_date) 
-       VALUES (?, ?, ?, ?, ?, 'active', CURDATE(), ?)`,
-      [req.user.organization_id, planId, price, paymentMethod, billingCycle, mysqlDate]
+      `INSERT INTO subscription_history (organization_id, plan_id, amount, payment_method, billing_cycle, status, start_date, end_date, receipt_path) 
+       VALUES (?, ?, ?, ?, ?, 'pending_verification', CURDATE(), ?, ?)`,
+      [req.user.organization_id, planId, price, paymentMethod, billingCycle, mysqlDate, req.file.path]
     );
 
     res.json({
-      message: 'Subscription upgraded successfully',
+      message: 'Subscription upgrade request submitted successfully. We will verify your payment and activate your plan within 24 hours.',
       plan: planId,
       amount: price,
       billingCycle,
@@ -320,6 +365,7 @@ const checkPlanLimits = async (req, res) => {
 
 module.exports = {
   getSubscriptionPlans,
+  upload,
   upgradeSubscription,
   renewSubscription,
   getSubscriptionStatus,

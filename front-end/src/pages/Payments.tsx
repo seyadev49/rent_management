@@ -12,6 +12,7 @@ import {
   Clock,
   X
 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 
 interface Payment {
   id: number;
@@ -138,6 +139,28 @@ const Payments: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to update payment status:', error);
+    }
+  };
+
+  const handleDelete = async (paymentId: number) => {
+    if (!confirm('Are you sure you want to delete this payment record?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/payments/${paymentId}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        fetchPayments();
+      }
+    } catch (error) {
+      console.error('Failed to delete payment:', error);
+      alert('Failed to delete payment');
     }
   };
 
@@ -379,10 +402,11 @@ const Payments: React.FC = () => {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                    <div className="flex items-center justify-end space-x-2">
                     {payment.status === 'pending' && (
                       <button
                         onClick={() => handleStatusUpdate(payment.id, 'paid')}
-                        className="text-green-600 hover:text-green-900 mr-3"
+                        className="text-green-600 hover:text-green-900"
                       >
                         Mark Paid
                       </button>
@@ -390,11 +414,19 @@ const Payments: React.FC = () => {
                     {payment.status === 'overdue' && (
                       <button
                         onClick={() => handleStatusUpdate(payment.id, 'paid')}
-                        className="text-green-600 hover:text-green-900 mr-3"
+                        className="text-green-600 hover:text-green-900"
                       >
                         Mark Paid
                       </button>
                     )}
+                    <button
+                      onClick={() => handleDelete(payment.id)}
+                      className="text-red-600 hover:text-red-900"
+                      title="Delete Payment"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                    </div>
                   </td>
                 </tr>
               ))}

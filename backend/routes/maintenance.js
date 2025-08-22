@@ -4,6 +4,7 @@ const { checkPlanLimit } = require('../middleware/planLimits');
 const {
   createMaintenanceRequest,
   getMaintenanceRequests,
+  getMaintenanceRequestById,
   updateMaintenanceRequest,
   deleteMaintenanceRequest
 } = require('../controllers/maintenanceController');
@@ -20,6 +21,7 @@ const maintenanceValidation = [
 
 router.post('/', authenticateToken, checkPlanLimit('maintenance_requests'), maintenanceValidation, createMaintenanceRequest);
 router.get('/', authenticateToken, getMaintenanceRequests);
+router.get('/:id', authenticateToken, getMaintenanceRequestById);
 router.put('/:id', authenticateToken, updateMaintenanceRequest);
 router.delete('/:id', authenticateToken, deleteMaintenanceRequest);
 

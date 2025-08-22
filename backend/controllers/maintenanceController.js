@@ -72,6 +72,33 @@ const getMaintenanceRequests = async (req, res) => {
   }
 };
 
+const getMaintenanceRequestById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [requests] = await db.execute(
+      `SELECT mr.*, p.name as property_name, pu.unit_number, t.full_name as tenant_name,
+              u.full_name as assigned_to_name
+       FROM maintenance_requests mr
+       JOIN properties p ON mr.property_id = p.id
+       LEFT JOIN property_units pu ON mr.unit_id = pu.id
+       LEFT JOIN tenants t ON mr.tenant_id = t.id
+       LEFT JOIN users u ON mr.assigned_to = u.id
+       WHERE mr.id = ? AND mr.organization_id = ?`,
+      [id, req.user.organization_id]
+    );
+
+    if (requests.length === 0) {
+      return res.status(404).json({ message: 'Maintenance request not found' });
+    }
+
+    res.json({ request: requests[0] });
+  } catch (error) {
+    console.error('Get maintenance request error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 const updateMaintenanceRequest = async (req, res) => {
   try {
     const { id } = req.params;
@@ -148,6 +175,7 @@ const deleteMaintenanceRequest = async (req, res) => {
 module.exports = {
   createMaintenanceRequest,
   getMaintenanceRequests,
+  getMaintenanceRequestById,
   updateMaintenanceRequest,
   deleteMaintenanceRequest
 };

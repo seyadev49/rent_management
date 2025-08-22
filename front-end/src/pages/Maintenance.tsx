@@ -47,6 +47,8 @@ const Maintenance: React.FC = () => {
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState<MaintenanceRequest | null>(null);
   const [filterStatus, setFilterStatus] = useState('');
   const [filterPriority, setFilterPriority] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -176,6 +178,14 @@ const Maintenance: React.FC = () => {
       const updateData: any = { status };
       if (status === 'completed') {
         updateData.completedDate = new Date().toISOString().split('T')[0];
+        const actualCost = prompt('Enter actual cost (optional):');
+        if (actualCost) {
+          updateData.actualCost = parseFloat(actualCost);
+        }
+        const notes = prompt('Enter completion notes (optional):');
+        if (notes) {
+          updateData.completionNotes = notes;
+        }
       }
 
       const response = await fetch(`http://localhost:5000/api/maintenance/${requestId}`, {
@@ -193,6 +203,76 @@ const Maintenance: React.FC = () => {
     } catch (error) {
       console.error('Failed to update maintenance request:', error);
     }
+  };
+
+  const handleUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!selectedRequest) return;
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/maintenance/${selectedRequest.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          ...formData,
+          unitId: formData.unitId || null,
+          tenantId: formData.tenantId || null,
+          estimatedCost: formData.estimatedCost ? parseFloat(formData.estimatedCost) : null,
+        }),
+      });
+
+      if (response.ok) {
+        setShowEditModal(false);
+        setSelectedRequest(null);
+        resetForm();
+        fetchRequests();
+      }
+    } catch (error) {
+      console.error('Failed to update maintenance request:', error);
+      alert('Failed to update maintenance request');
+    }
+  };
+
+  const handleDelete = async (requestId: number) => {
+    if (!confirm('Are you sure you want to delete this maintenance request?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/maintenance/${requestId}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        fetchRequests();
+      }
+    } catch (error) {
+      console.error('Failed to delete maintenance request:', error);
+      alert('Failed to delete maintenance request');
+    }
+  };
+
+  const openEditModal = (request: MaintenanceRequest) => {
+    setSelectedRequest(request);
+    const property = properties.find(p => p.name === request.property_name);
+    setFormData({
+      propertyId: property?.id.toString() || '',
+      unitId: '',
+      tenantId: '',
+      title: request.title,
+      description: request.description,
+      priority: request.priority,
+      estimatedCost: request.estimated_cost?.toString() || '',
+      requestedDate: request.requested_date,
+    });
+    setShowEditModal(true);
   };
 
   const resetForm = () => {
@@ -383,6 +463,20 @@ const Maintenance: React.FC = () => {
             </div>
 
             <div className="flex items-center justify-between">
+              <div className="flex space-x-2">
+                <button
+                  onClick={() => openEditModal(request)}
+                  className="text-sm text-blue-600 hover:text-blue-800"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => handleDelete(request.id)}
+                  className="text-sm text-red-600 hover:text-red-800"
+                >
+                  Delete
+                </button>
+              </div>
               {request.status === 'pending' && (
                 <button
                   onClick={() => handleStatusUpdate(request.id, 'in_progress')}
@@ -592,6 +686,131 @@ const Maintenance: React.FC = () => {
                     type="button"
                     onClick={() => {
                       setShowAddModal(false);
+                      resetForm();
+                    }}
+                    className="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Maintenance Request Modal */}
+      {showEditModal && selectedRequest && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
+              <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
+            </div>
+
+            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+              <form onSubmit={handleUpdate}>
+                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                  <div className="mb-4">
+                    <h3 className="text-lg font-medium text-gray-900 mb-4">Edit Maintenance Request</h3>
+                    
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Property *
+                        </label>
+                        <select
+                          name="propertyId"
+                          required
+                          value={formData.propertyId}
+                          onChange={handleInputChange}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        >
+                          <option value="">Select a property</option>
+                          {properties.map((property) => (
+                            <option key={property.id} value={property.id}>
+                              {property.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Title *
+                        </label>
+                        <input
+                          type="text"
+                          name="title"
+                          required
+                          value={formData.title}
+                          onChange={handleInputChange}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Description *
+                        </label>
+                        <textarea
+                          name="description"
+                          required
+                          value={formData.description}
+                          onChange={handleInputChange}
+                          rows={4}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Priority *
+                          </label>
+                          <select
+                            name="priority"
+                            required
+                            value={formData.priority}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          >
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                            <option value="urgent">Urgent</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Estimated Cost
+                          </label>
+                          <input
+                            type="number"
+                            name="estimatedCost"
+                            step="0.01"
+                            value={formData.estimatedCost}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                  <button
+                    type="submit"
+                    className="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm"
+                  >
+                    Update Request
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowEditModal(false);
+                      setSelectedRequest(null);
                       resetForm();
                     }}
                     className="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"

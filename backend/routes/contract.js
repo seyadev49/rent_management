@@ -5,7 +5,8 @@ const {
   getContracts,
   getContractById,
   updateContract,
-  deleteContract
+  deleteContract,
+  renewContract
 } = require('../controllers/contractController');
 const { authenticateToken, authorize } = require('../middleware/auth');
 
@@ -27,5 +28,6 @@ router.get('/', authenticateToken, getContracts);
 router.get('/:id', authenticateToken, getContractById);
 router.put('/:id', authenticateToken, authorize('landlord', 'admin'), updateContract);
 router.delete('/:id', authenticateToken, authorize('landlord', 'admin'), deleteContract);
+router.post('/:id/renew', authenticateToken, authorize('landlord', 'admin'), renewContract);
 
 module.exports = router;

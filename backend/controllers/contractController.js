@@ -270,10 +270,103 @@ const deleteContract = async (req, res) => {
   }
 };
 
+const renewContract = async (req, res) => {
+  const connection = await db.getConnection();
+  try {
+    const { id } = req.params;
+    const { newEndDate, monthlyRent, deposit, notes } = req.body;
+
+    await connection.query('START TRANSACTION');
+
+    // Get current contract details
+    const [contracts] = await connection.execute(
+      `SELECT rc.*, t.full_name as tenant_name, p.name as property_name, pu.unit_number
+       FROM rental_contracts rc
+       JOIN tenants t ON rc.tenant_id = t.id
+       JOIN properties p ON rc.property_id = p.id
+       JOIN property_units pu ON rc.unit_id = pu.id
+       WHERE rc.id = ? AND rc.organization_id = ?`,
+      [id, req.user.organization_id]
+    );
+
+    if (contracts.length === 0) {
+      await connection.query('ROLLBACK');
+      return res.status(404).json({ message: 'Contract not found' });
+    }
+
+    const contract = contracts[0];
+
+    // Update the existing contract
+    await connection.execute(
+      `UPDATE rental_contracts 
+       SET contract_end_date = ?, 
+           monthly_rent = ?, 
+           deposit = COALESCE(?, deposit),
+           status = 'active',
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND organization_id = ?`,
+      [newEndDate, monthlyRent, deposit, id, req.user.organization_id]
+    );
+
+    // Create a renewal record in contract history (if you have such a table)
+    // For now, we'll add a note to the activity logs
+    await connection.execute(
+      `INSERT INTO activity_logs (user_id, organization_id, action, details) 
+       VALUES (?, ?, 'contract_renewed', ?)`,
+      [
+        req.user.id,
+        req.user.organization_id,
+        JSON.stringify({
+          contract_id: id,
+          tenant_name: contract.tenant_name,
+          property: `${contract.property_name} Unit ${contract.unit_number}`,
+          old_end_date: contract.contract_end_date,
+          new_end_date: newEndDate,
+          new_monthly_rent: monthlyRent,
+          notes: notes
+        })
+      ]
+    );
+
+    // Create notification for landlord
+    await connection.execute(
+      `INSERT INTO notifications (organization_id, user_id, title, message, type) 
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        req.user.organization_id,
+        contract.landlord_id,
+        'Contract Renewed',
+        `Contract for ${contract.tenant_name} at ${contract.property_name} Unit ${contract.unit_number} has been renewed until ${new Date(newEndDate).toLocaleDateString()}. ${notes ? 'Notes: ' + notes : ''}`,
+        'general'
+      ]
+    );
+
+    await connection.query('COMMIT');
+
+    res.json({
+      message: 'Contract renewed successfully',
+      renewalDetails: {
+        tenant_name: contract.tenant_name,
+        property: `${contract.property_name} Unit ${contract.unit_number}`,
+        new_end_date: newEndDate,
+        monthly_rent: monthlyRent
+      }
+    });
+
+  } catch (error) {
+    await connection.query('ROLLBACK');
+    console.error('Renew contract error:', error);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
+    connection.release();
+  }
+};
+
 module.exports = {
   createContract,
   getContracts,
   getContractById,
   updateContract,
-  deleteContract
+  deleteContract,
+  renewContract
 };
